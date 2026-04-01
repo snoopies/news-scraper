@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-News Scraper - 获取新闻标题及链接
+News Scraper - 获取新闻标题及链接，翻译为中文
 """
 
 import requests
@@ -9,6 +9,24 @@ import pandas as pd
 from datetime import datetime
 import json
 import re
+from deep_translator import GoogleTranslator
+from openpyxl import load_workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
+
+def translate_to_chinese(text):
+    """翻译文本为中文"""
+    try:
+        # 限制翻译长度，避免超时
+        if len(text) > 500:
+            text = text[:500]
+        
+        translator = GoogleTranslator(source='auto', target='zh-CN')
+        translated = translator.translate(text)
+        return translated
+    except Exception as e:
+        print(f"Translation error: {e}")
+        return text  # 翻译失败返回原文
 
 def get_nyt_news():
     """获取纽约时报最新新闻 - 通过 RSS-like 页面"""
@@ -218,10 +236,74 @@ def get_bbc_news():
         print(f"Error fetching BBC news: {e}")
         return []
 
+def beautify_excel(file_path):
+    """美化Excel表格"""
+    try:
+        wb = load_workbook(file_path)
+        ws = wb.active
+        
+        # 定义样式
+        header_font = Font(name='Arial', size=12, bold=True, color='FFFFFF')
+        header_fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
+        header_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        
+        body_font = Font(name='Arial', size=10)
+        body_alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
+        
+        # 边框样式
+        thin_border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+        
+        # 设置列宽
+        ws.column_dimensions['A'].width = 15  # source
+        ws.column_dimensions['B'].width = 50  # title
+        ws.column_dimensions['C'].width = 50  # title_zh
+        ws.column_dimensions['D'].width = 60  # link
+        ws.column_dimensions['E'].width = 20  # timestamp
+        
+        # 美化表头
+        for cell in ws[1]:
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_alignment
+            cell.border = thin_border
+        
+        # 美化数据行
+        for row in ws.iter_rows(min_row=2):
+            for cell in row:
+                cell.font = body_font
+                cell.alignment = body_alignment
+                cell.border = thin_border
+                
+                # 为不同来源设置不同的背景色
+                source_cell = row[0]  # source列
+                if source_cell.value == 'New York Times':
+                    row[0].fill = PatternFill(start_color='E7E6E6', end_color='E7E6E6', fill_type='solid')
+                elif source_cell.value == 'AOL':
+                    row[0].fill = PatternFill(start_color='F2F2F2', end_color='F2F2F2', fill_type='solid')
+                elif source_cell.value == 'BBC':
+                    row[0].fill = PatternFill(start_color='D9E1F2', end_color='D9E1F2', fill_type='solid')
+                elif source_cell.value == 'Reuters':
+                    row[0].fill = PatternFill(start_color='E2EFDA', end_color='E2EFDA', fill_type='solid')
+        
+        # 冻结首行
+        ws.freeze_panes = 'A2'
+        
+        # 保存
+        wb.save(file_path)
+        print(f"✅ Excel表格已美化")
+        
+    except Exception as e:
+        print(f"⚠️ 美化Excel时出错: {e}")
+
 def main():
-    print("=" * 50)
-    print("开始抓取新闻...")
-    print("=" * 50)
+    print("=" * 60)
+    print("🌍 新闻抓取器 - 支持中文翻译")
+    print("=" * 60)
 
     # 获取新闻
     print("\n📰 正在获取纽约时报新闻...")
@@ -243,12 +325,21 @@ def main():
     # 合并新闻
     all_news = nyt_news + aol_news + reuters_news + bbc_news
 
-    print(f"\n{'=' * 50}")
-    print(f"共获取 {len(all_news)} 条新闻")
-    print(f"{'=' * 50}")
+    print(f"\n{'=' * 60}")
+    print(f"📊 共获取 {len(all_news)} 条新闻")
+    print(f"{'=' * 60}")
 
     # 创建 DataFrame
     if all_news:
+        print(f"\n🔄 正在翻译标题为中文...")
+        
+        # 翻译标题
+        for i, item in enumerate(all_news):
+            print(f"   翻译中... {i+1}/{len(all_news)}", end='\r')
+            item['title_zh'] = translate_to_chinese(item['title'])
+        
+        print(f"\n   ✅ 翻译完成")
+        
         df = pd.DataFrame(all_news)
 
         # 生成文件名
@@ -258,8 +349,11 @@ def main():
         # 保存到 Excel
         df.to_excel(excel_file, index=False, engine='openpyxl')
         print(f"\n✅ Excel 文件已生成: {excel_file}")
-        print(f"   文件位置: {excel_file}")
-
+        
+        # 美化Excel
+        print(f"\n🎨 正在美化Excel表格...")
+        beautify_excel(excel_file)
+        
         # 输出摘要
         print(f"\n📊 新闻统计:")
         source_counts = df['source'].value_counts()
@@ -270,7 +364,7 @@ def main():
         # 即使没有新闻也生成空文件
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         excel_file = f'news_list_{timestamp}.xlsx'
-        df = pd.DataFrame(columns=['source', 'title', 'link', 'timestamp'])
+        df = pd.DataFrame(columns=['source', 'title', 'title_zh', 'link', 'timestamp'])
         df.to_excel(excel_file, index=False, engine='openpyxl')
         print(f"\n⚠️ 未获取到新闻，已生成空文件: {excel_file}")
 
@@ -288,7 +382,8 @@ def main():
     with open('news_output.json', 'w', encoding='utf-8') as f:
         json.dump(output, f, ensure_ascii=False, indent=2)
 
-    print("\n🎉 新闻抓取完成！")
+    print(f"\n🎉 新闻抓取完成！")
+    print(f"📁 文件: {excel_file}")
 
 if __name__ == '__main__':
     main()
